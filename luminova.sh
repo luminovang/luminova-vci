@@ -112,6 +112,16 @@ _version() {
     exit 0
 }
 
+_paths() {
+    _include "config"
+
+    _print "Luminova VCI Paths" success
+    _print "LUMINOVA_VCI_SCRIPT_DIR=$SCRIPT_DIR"
+    
+    config_get
+    exit 0
+}
+
 
 trap _cleanup_trap EXIT
 
@@ -122,10 +132,7 @@ for arg in "$@"; do
         -l|--list)                LIST_RELEASES=1 ;;
         -f|--force)               FORCE=1 ;;
         -d|--delete)              DELETE_REPO=1 ;;
-        --paths)              
-            echo "$SCRIPT_DIR"
-            exit 0 
-            ;;
+        --paths)                  _paths ;;
         --path=*)                 USE_PACKAGES_DIR="${arg#*=}" ;;
         --self=*)                 SELF_ACTION="${arg#*=}" ;;
         -b=*|--branch=*)          BRANCH="${arg#*=}" ;;

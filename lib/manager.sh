@@ -9,13 +9,13 @@ manager_install_self() {
     local target_dir conf_dir
 
     if [ "$runtime" = "root" ] && ! _is_root; then
-        _print "Global install requires root. Try: sudo $0 self-install" error 1 1
+        _print "Global install requires root. Try: sudo $0 --self=install" error 1 1
         exit 1
     fi
 
     if [ -z "$target" ]; then
         target="$(config_script_target_bin "$runtime")" || {
-            _print "Could not find PATH. Use --target=<path> to specify installation path"
+            _print "Could not find PATH. Use --bin=<path> to specify installation path"
             exit 1
         }
 
@@ -31,7 +31,7 @@ manager_install_self() {
 
     if [ -e "$target" ] || [ -L "$target" ]; then
         _print "Already installed at $target" warn 1
-        _print "Use 'self-update' to upgrade or 'self-uninstall' to remove." info
+        _print "Use '--self=update' to upgrade or '--self=uninstall' to remove." info
         exit 1
     fi
 
@@ -94,7 +94,7 @@ manager_uninstall_self() {
     local link_path is_main_script
 
     if [ "$runtime" = "root" ] && ! _is_root; then
-        _print "Root privileges required for global uninstall. Try: sudo luminova self-uninstall" error 1 1
+        _print "Root privileges required for global uninstall. Try: sudo luminova --self=uninstall" error 1 1
         exit 1
     fi
 
