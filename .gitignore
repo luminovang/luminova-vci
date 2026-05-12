@@ -1,0 +1,19 @@
+# macOS system file
+.DS_Store
+
+# Common folders to ignore
+/unused/
+/tests/
+/docs/
+/log/
+/dump/
+/vscode/
+/vendor/
+/ssh
+.git/
+.idea/
+.vscode/
+.fleet/
+.phpdoc
+info.md
+
