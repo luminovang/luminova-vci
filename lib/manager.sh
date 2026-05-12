@@ -65,8 +65,6 @@ manager_install_self() {
             "LUMINOVA_VCI_BIN=$target" \
             "LUMINOVA_VCI_BASE=$base" \
             "LUMINOVA_VCI_CONF=$conf_dir"
-
-        # PACKAGES_DIR="$SCRIPT_DIR/packages"
     fi
     
     # Offer to add the install directory to PATH if luminova isn't found yet

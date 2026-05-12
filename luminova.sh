@@ -25,11 +25,10 @@ if ! (return 0 2>/dev/null); then
     set -euo pipefail
 fi
 
-readonly VERSION="2.1.0"
+readonly VERSION="1.0.0"
 readonly PRODUCTION=1
 readonly SELF_REPO_URL="https://github.com/luminovang/luminova-vci.git"
 readonly PACKAGE_REPO_URL="https://github.com/luminovang/framework.git"
-# readonly PACKAGE_REPO_URL="/Applications/XAMPP/xamppfiles/htdocs/luminova.code"
 readonly _OS="$(uname -s)"
 readonly SCRIPT_ENTRY="${BASH_SOURCE[0]}"
 
