@@ -1,154 +1,210 @@
-# PHP Luminova — Shared Module Deployment Guide
+# PHP Luminova — Version Control Interface (VCI)
 
-A step-by-step guide to installing, managing, and switching Luminova framework releases on your server using `luminova.sh` or the `luminova` Python CLI.
+A lightweight tool for managing shared Luminova PHP framework installations across one or more
+projects on a single server.
 
 ---
 
-## What does this tool do?
+## What problem does this solve?
 
-Instead of bundling the Luminova framework inside every project, this tool installs it **once** into a shared directory (e.g. `/opt/luminova/packages`). Each PHP project then points to that shared installation. This means:
+Normally, each PHP project carries its own copy of the Luminova framework. That means:
 
-- Update the framework in one place and all projects benefit immediately.
-- Install multiple versions side-by-side and switch between them without downtime.
-- Roll back to a previous version in seconds.
+- The same files duplicated across every project
+- Framework updates applied one project at a time
+- No easy way to roll back if an update breaks something
+
+**Luminova VCI solves this by installing the framework once** into a shared directory. Every
+project points to that shared copy. When you update or switch versions, all projects follow
+immediately — no per-project changes needed.
+
+Think of it like a PHP version manager (e.g. `phpenv`), but for the Luminova framework itself.
+
+---
+
+## How it works
+
+```
+/opt/luminova/packages/
+    releases/
+        3.8.0/      ← a full framework build
+        3.9.0/      ← another build
+    current  →      ← symlink pointing to the active release
+```
+
+Your PHP projects reference `packages/current/`. When you run `--switch=3.9.0`, only the
+symlink changes. No files are copied, no projects need to be restarted.
+
+A `vci.conf` file records the VCI binary location and packages directory. A future VCI switcher UI will
+use this file to manage versions without shell access.
+
+---
+
+## Requirements
+
+| Tool | Purpose |
+|------|---------|
+| `bash` 4+ | Runs the VCI script |
+| `git` | Clones the framework source |
+| `rsync` | Builds release directories |
+| `sha256sum` or `shasum` | Detects unchanged builds (skips unnecessary rebuilds) |
+| `sudo` / root access | Writes to `/opt/` and locks permissions |
+
+Verify everything is available before you start:
+
+```bash
+bash --version && git --version && rsync --version && sha256sum --version
+```
 
 ---
 
 ## Installation
 
-### Install via pip (Python CLI wrapper)
+There are two ways to install the VCI: via **Git clone** (shell-only) or via **pip** (adds a
+Python CLI wrapper). Choose the one that fits your workflow.
+
+---
+
+### Option A — Git clone (recommended for servers)
+
+```bash
+# SSH into your server
+ssh user@your-server
+
+# Create the installation directory
+sudo mkdir -p /opt/luminova
+
+# Clone the VCI into it
+sudo git clone https://github.com/luminovang/luminova-vci.git /opt/luminova
+
+# Make the script executable
+sudo chmod +x /opt/luminova/luminova.sh
+
+# Register it as a global command (so you can run 'luminova' from anywhere)
+sudo /opt/luminova/luminova.sh --self=install
+```
+
+After the last step, the `luminova` command is available system-wide.
+
+> **User-mode install (no root required)**
+> Drop `sudo` from the commands above and use `--runtime=user`. The script will install to
+> `~/.local/bin/luminova` instead of `/usr/local/bin/luminova`.
+
+---
+
+### Option B — pip (Python CLI wrapper)
+
+If you prefer Python tooling or want to use the VCI inside build pipelines:
 
 ```bash
 pip install git+https://github.com/luminovang/luminova-vci.git
 ```
 
-Or pin to a specific release:
+Pin to a specific version:
 
 ```bash
-pip install git+https://github.com/luminovang/luminova-vci.git@v2.0.0
+pip install git+https://github.com/luminovang/luminova-vci.git@v2.1.0
 ```
 
-After installation the `luminova` command is available in your shell.
-
-### Install as a system command (shell only)
-
-Upload `luminova.sh` to your server, make it executable, then install it:
-
-```bash
-scp luminova.sh user@your-server:/opt/luminova/luminova.sh
-ssh user@your-server
-chmod +x /opt/luminova/luminova.sh
-sudo /opt/luminova/luminova.sh self-install
-```
-
-This symlinks the script to `/usr/local/bin/luminova` so you can run `luminova` from anywhere.
+The `luminova` command installed by pip accepts all the same flags as the shell script. See
+[Python usage](#python-api) for programmatic access.
 
 ---
 
-## Before you begin
+### Option C — manual upload (shared hosting)
 
-**Requirements on your server:**
-
-| Tool | Purpose |
-|------|---------|
-| `bash` 4+ | Run the script |
-| `git` | Clone the framework source |
-| `rsync` | Build release directories |
-| `sha256sum` or `shasum` | Detect changes between builds |
-| `sudo` / `root` | Write to `/opt/` and lock permissions |
-
-Check availability:
+If you cannot clone directly on the server, upload the files from your local machine first:
 
 ```bash
-git --version && rsync --version && sha256sum --version
+scp -r /path/to/luminova-vci/. user@your-server:/opt/luminova/
 ```
+
+Then SSH in and follow the steps from Option A starting at `chmod +x`.
 
 ---
 
 ## Directory structure
 
-The script manages this layout automatically:
+After installation, your directory will look like this:
 
 ```
 /opt/luminova/
-    luminova.sh               ← deployment script
+    luminova.sh               ← main VCI script
+    lib/                      ← internal modules (do not edit)
     packages/
-        repo/               ← temporary git clone (build source)
+        repo/                 ← temporary git clone used during builds
         releases/
-            3.8.0/          ← a built release
-            3.9.0/          ← another built release
-        current ->          ← symlink to the active release
+            3.8.0/            ← built release
+            3.9.0/            ← another built release
+        current  →            ← symlink to the active release
 ```
 
-PHP projects reference `packages/current/`, so switching versions updates only the symlink — no file copying required.
+`vci.conf` is saved to the first writable location found in this order:
 
----
-
-## Step 1 — Upload and prepare the script
-
-```bash
-scp luminova.sh user@your-server:/opt/luminova/luminova.sh
-ssh user@your-server
-chmod +x /opt/luminova/luminova.sh
-cd /opt/luminova
+```
+/etc/luminova/
+/var/lib/luminova/
+~/.config/.luminova/
+~/.local/share/.luminova/
+~/.luminova/
 ```
 
 ---
 
-## Step 2 — Install a release
+## Installing a framework release
 
-Install a specific version:
+Once the VCI itself is installed, use it to install Luminova framework versions.
+
+**Install the latest version** (auto-detected from git tags):
 
 ```bash
-sudo ./luminova.sh --install=3.8.0
+sudo luminova --install
 ```
 
-Install the **latest** version (auto-detected from git tags):
+**Install a specific version:**
 
 ```bash
-sudo ./luminova.sh --install
+sudo luminova --install=3.8.0
 ```
 
 What happens during install:
-1. Clones the framework source from GitHub into `packages/repo/`
-2. Builds the release into `packages/releases/3.8.0/`
-3. Points `packages/current` at the new release
-4. Records a content hash to avoid redundant rebuilds on the next run
 
-> **Tip:** Running the same install command twice with no source changes is safe — the script detects this via hash comparison and skips the rebuild automatically.
+1. The framework source is cloned from [GitHub](https://github.com/luminovang/framework) into `packages/repo/`
+2. The requested version is checked out and built into `packages/releases/3.8.0/`
+3. `packages/current` is updated to point at the new release
+4. A content hash is saved so identical rebuilds are skipped automatically
+5. `vci.conf` is written with the binary path and packages directory
+
+> **Running the same install command twice is safe.** 
+> The VCI compares content hashes and
+> skips the rebuild if nothing has changed. Use `--update` or `--force` when you need to
+> override this.
 
 ---
 
-## Step 3 — Configure your PHP project
+## Configuring your PHP project
 
-Add a `.luminova.php` file to the root of each project:
+Add a `.luminova.php` file to the root of each project. This tells the framework where to find
+the shared installation.
 
 ```php
 <?php
-// /.luminova.php
+// .luminova.php (project root)
 return [
-    /*
-     | Enable shared framework resolution.
-     */
+
+    // Enable shared framework resolution
     'resolve.paths' => true,
 
-    /*
-     | Autoloader strategy:
-     |   'auto'     → prefer Composer, fall back to Luminova's own loader
-     |   'composer' → Composer only
-     |   'luminova' → Luminova's loader only
-     */
+    // Autoloader strategy:
+    //   'auto'     → prefer Composer, fall back to Luminova's own loader
+    //   'composer' → Composer only
+    //   'luminova' → Luminova's loader only
     'resolve.autoloader' => 'auto',
 
-    /*
-     | Minimum required framework version.
-     */
+    // Minimum required framework version
     'luminova.version' => '>=3.8',
 
-    /*
-     | Paths to the shared framework directories.
-     | 'current' always resolves to the active symlink.
-     */
+    // Paths to the shared framework
+    // 'current' always follows the active symlink
     'luminova.paths' => [
         'root'      => '/opt/luminova/packages',
         'system'    => '/opt/luminova/packages/current/system',
@@ -157,7 +213,7 @@ return [
 ];
 ```
 
-To pin a project to a **specific version** rather than always following `current`:
+**To pin a project to a specific version** instead of always following `current`:
 
 ```php
 'system'    => '/opt/luminova/packages/releases/3.8.0/system',
@@ -168,13 +224,14 @@ To pin a project to a **specific version** rather than always following `current
 
 ## Common commands
 
-### See all installed releases
+### List all installed releases
 
 ```bash
-sudo ./luminova.sh --list
+sudo luminova --list
 ```
 
 Example output:
+
 ```
 Installed releases:
   3.7.8
@@ -182,66 +239,108 @@ Installed releases:
   3.9.0
 ```
 
-### Check which version is active
+### Check the active version
 
 ```bash
-sudo ./luminova.sh --current
+sudo luminova --current
 ```
 
-### Switch to a different installed release (instant, no rebuild)
+### Switch to a different release (instant, no rebuild)
 
 ```bash
-sudo ./luminova.sh --switch=3.9.0
+sudo luminova --switch=3.9.0
 ```
 
-Only works if the target version is already installed. Updates the symlink only — no files are copied.
+This only works if the target version is already installed. Only the symlink is updated — no
+files are copied or rebuilt.
 
 ### Update to the latest version
 
 ```bash
-sudo ./luminova.sh --update
+sudo luminova --update
 ```
 
 Or update to a specific version:
 
 ```bash
-sudo ./luminova.sh --update=3.9.0
+sudo luminova --update=3.9.0
 ```
+
+`--update` always rebuilds from source and bypasses the hash check. Use it when you want to
+force reinstallation of a version that is already present.
+
+### Roll back to a previous version
+
+```bash
+# See what is installed
+sudo luminova --list
+
+# Switch back
+sudo luminova --switch=3.8.0
+```
+
+No rebuild needed. Projects resume using `3.8.0` immediately.
 
 ---
 
 ## Advanced options
 
+### Install from a specific git branch
+
+```bash
+sudo luminova --install --branch=develop
+sudo luminova --install=3.8.0 --branch=hotfix/3.8.x
+```
+
+When combined with `--install=<version>`, the tag is checked out within that branch. When used
+with `--install` alone, the latest tag on that branch is auto-detected.
+
+### Change the packages directory
+
+By default, packages are stored in `packages/` next to `luminova.sh`. Override this with
+`--path`:
+
+```bash
+sudo luminova --install=3.8.0 --path=/srv/luminova/shared
+```
+
+Print the current VCI script directory:
+
+```bash
+luminova --paths
+```
+
 ### Force a fresh clone
 
-Use `--force` if the local repo clone is corrupted or you want to start from scratch:
+Use `--force` when the local repo clone is corrupted or you want a clean start:
 
 ```bash
-sudo ./luminova.sh --install=3.8.0 --force
+sudo luminova --install=3.8.0 --force
 ```
 
-Deletes the `repo/` directory and re-clones. Also disables the hash check for that run.
+This deletes the `repo/` directory and re-clones from scratch. It also disables the hash check
+for that run.
 
-### Clean up source files after build
+### Remove the repo after building
 
-The `repo/` directory is only needed during the build. Use `--delete` to remove its contents afterwards (`.git` is kept so future pulls are fast):
+`repo/` is only needed during the build. Use `--delete` to remove it afterwards:
 
 ```bash
-sudo ./luminova.sh --install=3.8.0 --delete
+sudo luminova --install=3.8.0 --delete
 ```
 
-### Lock permissions after deploy
+The `.git` folder is preserved so future updates are incremental rather than full re-clones.
 
-For production servers, lock the packages directory so only `root` can modify it:
+### Lock file permissions
 
-```bash
-sudo ./luminova.sh --install=3.8.0 --lock-permission
-```
-
-Default mode is `755`. For a stricter `555` (read + execute only):
+On production servers, restrict the packages directory so only root can modify it:
 
 ```bash
-sudo ./luminova.sh --install=3.8.0 --lock-permission=555
+# Default mode (755) — recommended for most setups
+sudo luminova --install=3.8.0 --lock-permission
+
+# Stricter mode (555) — read and execute only, no writes even for root
+sudo luminova --install=3.8.0 --lock-permission=555
 ```
 
 ---
@@ -251,142 +350,229 @@ sudo ./luminova.sh --install=3.8.0 --lock-permission=555
 ### Remove a specific version
 
 ```bash
-sudo ./luminova.sh --reset=3.7.8
+sudo luminova --reset=3.7.8
 ```
 
-If the removed version was active, the script automatically promotes the next latest release.
+If the removed version was active, the VCI automatically promotes the next latest installed
+release and updates the symlink.
 
-### Remove the repo clone only (free up disk space)
+### Free up disk space (remove the repo clone only)
 
 ```bash
-sudo ./luminova.sh --reset=repo
+sudo luminova --reset=repo
 ```
 
-Does not touch `releases/` or `current`.
+This removes the temporary `repo/` directory but does not touch `releases/` or `current`.
 
-### Full reset (remove everything)
+### Full reset — remove everything
 
 ```bash
-sudo ./luminova.sh --reset
+sudo luminova --reset
 ```
 
-⚠️ Warning
-Removes all releases, the repo clone, and the active symlink. 
-Prompts for confirmation unless `--force` is also passed.
+> ⚠️ **Warning:** 
+> This removes all releases, the repo clone, and the active symlink.
+> The script will ask for confirmation before proceeding.
 
 ### Skip the confirmation prompt
 
 ```bash
-sudo ./luminova.sh --reset --force
-sudo ./luminova.sh --reset=3.7.8 --force
+sudo luminova --reset --force
+sudo luminova --reset=3.7.8 --force
 ```
-
----
-
-## Rollback procedure
-
-```bash
-# Check what's installed
-sudo ./luminova.sh --list
-
-# Switch back to the previous working version
-sudo ./luminova.sh --switch=3.8.0
-```
-
-No rebuild required. Projects resume using `3.8.0` immediately.
 
 ---
 
 ## Self-management
 
+These commands manage the `luminova` VCI binary itself — not the framework packages.
+
 ### Install as a global command
 
 ```bash
-sudo ./luminova.sh self-install          # installs to /usr/local/bin/luminova
-./luminova.sh self-install               # installs to ~/.local/bin/luminova
+# System-wide (requires root) → /usr/local/bin/luminova
+sudo ./luminova.sh --self=install
+
+# User-space (no root needed) → ~/.local/bin/luminova
+./luminova.sh --self=install
 ```
 
-### Update the installed script from GitHub
+A symlink is created so that changes to `luminova.sh` are reflected immediately. If the
+filesystem does not support symlinks, a plain copy is made instead.
+
+### Update the VCI script from GitHub
 
 ```bash
-sudo luminova self-update
+# Update to the latest version
+sudo luminova --self=update
+
+# Update to a specific tag
+sudo luminova --self=update --branch=v2.1.0
 ```
 
-### Uninstall
+The update process downloads to an isolated temp directory, validates the new script syntax
+with `bash -n`, compares version strings, and only then replaces the installed binary.
+
+### Uninstall the VCI script
 
 ```bash
-sudo luminova self-uninstall             # remove binary only
-sudo luminova self-uninstall --purge     # remove binary + all data directories
+# Remove the binary only
+sudo luminova --self=uninstall
+
+# Remove the binary and vci.conf
+sudo luminova --self=uninstall --purge
 ```
 
 ---
 
 ## Python API
 
+The `luminova` Python package provides a thin programmatic interface for build pipelines and
+deployment scripts.
+
 ```python
 from luminova import runner
 
-# Run a command programmatically
+# Returns the shell exit code
 exit_code = runner.run(["--install=3.8.0", "--runtime=user"])
 
-# Or let it call sys.exit automatically
+# Install from a branch
+runner.run(["--install", "--branch=develop"])
+
+# Exit automatically if the command fails
 runner.run_or_exit(["--list"])
 
 # Enable bash xtrace for debugging
 runner.run(["--install"], env={"DEBUG": "1"})
 ```
 
+### Python CLI examples
+
+```bash
+# Self-management
+luminova self-install
+luminova self-update
+luminova self-update --branch=v2.1.0
+luminova self-uninstall --purge
+
+# Installing and updating
+luminova --install
+luminova --install=3.8.0
+luminova --install=3.8.0 --runtime=root --lock-permission=755
+luminova --install --branch=develop
+luminova --update=3.9.0
+luminova --update --force
+
+# Switching and inspecting
+luminova --switch=3.8.0
+luminova --list
+luminova --current
+
+# Cleanup
+luminova --reset
+luminova --reset=3.7.8
+luminova --reset=repo --force
+```
+
 ---
 
-## Reference: all options
+## All options reference
 
-| Flag | Description |
-|------|-------------|
-| `--help` | Show usage summary |
-| `--version` | Show the deploy tool version |
-| `--list` | List all installed releases |
-| `--current` | Show the active release |
-| `--install[=<version>]` | Install a release (omit version to use latest tag) |
-| `--update[=<version>]` | Update to a release (always rebuilds) |
-| `--switch=<version>` | Activate an already-installed release without rebuilding |
-| `--reset` | Remove all releases, repo, and symlink |
-| `--reset=<version>` | Remove one release (or `repo` to remove the clone only) |
-| `--force` | Skip confirmation prompts; force re-clone on install |
-| `--delete` | Remove repo source files after building |
-| `--lock-permission[=<mode>]` | Lock packages dir to `root:root` with given mode (default `755`) |
-| `--runtime=<mode>` | Runtime user mode: `root` \| `user` \| `auto` |
-| `--purge` | Purge Luminova data directories on `self-uninstall` |
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--help` | `-h` | Show usage summary |
+| `--version` | `-v` | Show the VCI tool version |
+| `--list` | `-l` | List all installed releases |
+| `--current` | `-c` | Show the active release |
+| `--paths` | | Print the VCI script directory and exit |
+| `--path=<dir>` | | Override the default packages storage directory |
+| `--install[=<version>]` | `-i` | Install a release (omit version for latest git tag) |
+| `--update[=<version>]` | `-u` | Update a release — always rebuilds, bypasses hash check |
+| `--switch=<version>` | `-s` | Activate an already-installed release without rebuilding |
+| `--branch=<ref>` | `-b` | Git branch or tag for `--install`, `--update`, or `--self=update` |
+| `--reset` | `-r` | Remove all releases, the repo clone, and the symlink |
+| `--reset=<target>` | `-r` | Remove one release, or pass `repo` to remove only the clone |
+| `--force` | `-f` | Skip confirmations; force a fresh re-clone on install |
+| `--delete` | `-d` | Remove repo source files after building |
+| `--lock-permission[=<mode>]` | `-m` | Lock packages directory permissions (default: `755`) |
+| `--runtime=<mode>` | `-ru` | Runtime mode: `root` \| `user` \| `auto` (default: `auto`) |
+| `--purge` | `-p` | Purge `vci.conf` when running `--self=uninstall` |
+| `--self=<action>` | | Self-management: `install` \| `update` \| `uninstall` |
 
 ---
 
 ## Troubleshooting
 
 **"Release not found" when switching**
-The version isn't in `releases/`. Run `--list` to see what's installed, then `--install=<version>` if missing.
+
+The version is not in `releases/`. Run `--list` to see what is installed:
+
+```bash
+sudo luminova --list
+sudo luminova --install=3.9.0   # install it if missing
+```
+
+---
 
 **Build fails with "Source directory not found"**
-The repo clone failed or was deleted. Re-clone with:
+
+The repo clone failed or was removed. Force a clean re-clone:
+
 ```bash
-sudo ./luminova.sh --install=3.8.0 --force
+sudo luminova --install=3.8.0 --force
 ```
+
+---
 
 **"No changes detected" but you expect a rebuild**
-The hash from the previous build matches the current source. Use `--update` (or `--force`) to bypass the hash check:
+
+The content hash from the previous build matches the source. Use `--update` to bypass it:
+
 ```bash
-sudo ./luminova.sh --update=3.8.0
+sudo luminova --update=3.8.0
 ```
+
+---
 
 **Active symlink is broken after a crash**
+
+An interrupted build may have left a partial release without a hash file. The VCI cleans these
+up automatically on the next run. If `current` is also broken, restore it manually:
+
 ```bash
 sudo rm /opt/luminova/packages/current
-sudo ./luminova.sh --switch=3.8.0
+sudo luminova --switch=3.8.0
 ```
 
-**Permission errors when running the script**
-Most operations writing to `/opt/` require root. Prefix with `sudo`.
+---
 
-**Repo cloned on the wrong branch**
-Use `--force` to discard the existing clone and re-clone cleanly:
+**Permission errors when running the script**
+
+Operations that write to `/opt/` require root. Add `sudo`, or use `--runtime=user` to work in
+user space (`~/.local/`):
+
 ```bash
-sudo ./luminova.sh --install=3.8.0 --force
+sudo luminova --install=3.8.0
+# or
+luminova --install=3.8.0 --runtime=user
+```
+
+---
+
+**Repo was cloned from the wrong branch**
+
+Discard the existing clone and start fresh:
+
+```bash
+sudo luminova --install=3.8.0 --branch=hotfix/3.8.x --force
+```
+
+---
+
+**`--self=update` does not apply the update**
+
+If the binary is in `/usr/local/bin/`, writing to it requires root:
+
+```bash
+sudo luminova --self=update
 ```
