@@ -143,8 +143,8 @@ request_clone_repo() {
     }
 
     # --- checksum check here ---
-    # local expected="$expected_checksum" || "$(curl -fsSL "$target.sha256" | awk '{print $1}')"
-
+    # local expected="$(curl -fsSL "$target.sha256" | awk '{print $1}')"
+    # https://raw.githubusercontent.com/luminovang/luminova-vci/refs/heads/main/main.zip.sha256
     # if [ -n "$expected" ]; then
     #    verify_checksum "$tmp" "$expected" || {
     #        rm -f "$tmp"
