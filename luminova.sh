@@ -25,7 +25,7 @@ if ! (return 0 2>/dev/null); then
     set -euo pipefail
 fi
 
-readonly VERSION="1.0.0"
+readonly VERSION="1.1.0"
 readonly PRODUCTION=1
 readonly SELF_REPO_URL="https://github.com/luminovang/luminova-vci.git"
 readonly PACKAGE_REPO_URL="https://github.com/luminovang/framework.git"
@@ -117,7 +117,7 @@ _paths() {
 
     _print "Luminova VCI Paths" success
     _print "LUMINOVA_VCI_SCRIPT_DIR=$SCRIPT_DIR"
-    
+
     config_get
     exit 0
 }

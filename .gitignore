@@ -3,12 +3,10 @@
 
 # Common folders to ignore
 /unused/
-/tests/
-/docs/
-/log/
-/dump/
+/temp/
+/.tmp/
 /vscode/
-/vendor/
+/packages/
 /ssh
 .git/
 .idea/
