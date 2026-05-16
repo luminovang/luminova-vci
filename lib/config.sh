@@ -258,6 +258,7 @@ config_write() {
 
     TMP_CONFIG_FILE=""
     TMP_CONFIG_DIR=""
+    return 0
 }
 
 config_has() {
@@ -296,6 +297,7 @@ config_delete() {
     done < "$conf_file"
 
     mv "$tmp" "$conf_file"
+    return 0
 }
 
 config_clear() {

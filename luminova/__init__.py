@@ -7,16 +7,16 @@ from Python code or build pipelines.
 Typical usage
 -------------
 Command line (after pip install):
-    luminova --install=3.8.0
-    luminova --list
-    luminova self-update
+    luminova package --install=3.8.0
+    luminova package --list
+    luminova self --update
 
 Programmatic:
     from luminova import runner
-    exit_code = runner.run(["--install=3.8.0", "--runtime=user"])
+    exit_code = runner.run(["package", "--install=3.8.0", "--runtime=user"])
 """
 
-__version__ = "2.1.0"
+__version__ = "1.3.0"
 __author__ = "Luminova"
 __license__ = "MIT"
 

@@ -20,6 +20,7 @@ package_installed() {
 package_build_repo_structure() {
     local src="$1"
     local dest="$2"
+    local metadata="$dest/.metadata"
 
     if [ ! -d "$src" ]; then
         _print "Source directory not found: $src" error 1 1
@@ -33,15 +34,44 @@ package_build_repo_structure() {
 
     _print "Building release: $(basename "$dest")" info
 
-    mkdir -p "$dest/system" "$dest/bootstrap"
+    mkdir -p \
+        "$dest/system" \
+        "$dest/bootstrap" \
+        "$metadata/system" \
+        "$metadata/bootstrap"
 
-    # Sync framework core files; Boot.php is project-specific, exclude it
-    rsync -a --delete --exclude='Boot.php' \
+    #
+    # Capture excluded files BEFORE rsync
+    #
+    local boot_src="$src/src/Boot.php"
+    local const_src="$src/install/Boot/constants.php"
+
+    if [ -f "$boot_src" ]; then
+        cp -f "$boot_src" "$metadata/system/Boot.php"
+    fi
+
+    if [ -f "$const_src" ]; then
+        cp -f "$const_src" "$metadata/bootstrap/constants.php"
+    fi
+
+    #
+    # Sync system (clean mirror)
+    #
+    rsync -a --delete \
+        --exclude='Boot.php' \
         "$src/src/" "$dest/system/"
 
-    # Sync bootstrap stubs; constants.php is project-specific, exclude it
-    rsync -a --delete --exclude='constants.php' \
+    #
+    # Sync bootstrap (clean mirror)
+    #
+    rsync -a --delete \
+        --exclude='constants.php' \
         "$src/install/Boot/" "$dest/bootstrap/"
+
+    # Ensure runtime is writable if PHP will modify it later
+    # chown -R www-data:www-data "$dest"
+    # chmod -R 775 "$dest"
+    # chmod -R 775 "$dest/system" "$dest/bootstrap" "$metadata/system" "$metadata/bootstrap"
 }
 
 # Print all installed releases, marking the currently active one
@@ -194,19 +224,22 @@ package_force_delete_repo() {
 
     _assert_path "$repo" "$base" || return 1
 
-    if [ -d "$repo" ]; then
+    if [[ -d "$repo" ]]; then
         _print "Force mode: removing existing repo at $repo..." warn 1
-        if rm -rf "$repo"; then
+
+        if rm -rf -- "$repo"; then
             _clear_temp "$base"
-            return 0
+        else
+            _print "Failed to remove repo: $repo" error 1 1
+            return 1
         fi
     fi
 
-    return 1
+    return 0
 }
 
 # Remove all releases, the repo clone, and the current symlink
-package_modules_reset_all() {
+package_clear_modules() {
     local packages="${1:-${PACKAGES_DIR}}"
     local base="${2:-${SCRIPT_DIR}}"
     local force="$3"
@@ -223,7 +256,7 @@ package_modules_reset_all() {
 }
 
 # Remove a single release version or the repo clone directory
-package_reset_target_module() {
+package_remove_module() {
     local packages="${1:-${PACKAGES_DIR}}"
     local base="${2:-${SCRIPT_DIR}}"
     local target="$3"

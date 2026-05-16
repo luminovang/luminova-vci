@@ -144,7 +144,7 @@ request_clone_repo() {
 
     # --- checksum check here ---
     # local expected="$(curl -fsSL "$target.sha256" | awk '{print $1}')"
-    # https://raw.githubusercontent.com/luminovang/luminova-vci/refs/heads/main/main.zip.sha256
+    # https://raw.githubusercontent.com/luminovang/vci/refs/heads/main/main.zip.sha256
     # if [ -n "$expected" ]; then
     #    verify_checksum "$tmp" "$expected" || {
     #        rm -f "$tmp"
@@ -249,7 +249,7 @@ request_hash_repo() {
     fi
 }
 
-# package_sync_repo "$REPO_DIR" "$PULL_ORIGIN_SOURCE" "$BRANCH" "$RUNTIME_USER"
+# package_sync_repo "$REPO_DIR" "$PULL_ORIGIN_SOURCE" "$TARGET_VERSION" "$RUNTIME_USER"
 # request_sync_repo "$target" "$version" "$source" "$runtime"
 request_sync_repo() {
     local target="$1"
