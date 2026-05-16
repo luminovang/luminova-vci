@@ -25,9 +25,9 @@ if ! (return 0 2>/dev/null); then
     set -euo pipefail
 fi
 
-readonly VERSION="1.1.0"
+readonly VERSION="1.3.2"
 readonly PRODUCTION=1
-readonly SELF_REPO_URL="https://github.com/luminovang/luminova-vci.git"
+readonly SELF_REPO_URL="https://github.com/luminovang/vci.git"
 readonly PACKAGE_REPO_URL="https://github.com/luminovang/framework.git"
 readonly _OS="$(uname -s)"
 readonly SCRIPT_ENTRY="${BASH_SOURCE[0]}"
@@ -73,38 +73,47 @@ _self_name() {
     fi
 }
 
+_cmd() {
+    local name="${SELF_NAME:-$(_self_name "$BASE_SOURCE")}"
+    local cmd
+
+    printf -v cmd '%q ' "$name" "$@"
+    cmd=${cmd% }
+
+    printf '%s\n' "$cmd"
+}
+
 _include "head"
 
 # Resolved absolute path to this script and the preferred hash algorithm
 readonly SELF="$(_realpath "$BASE_SOURCE")"
-readonly SELF_NAME="$(_self_name "$SELF")"
+readonly SELF_NAME="$(_self_name "$BASE_SOURCE")"
 readonly HASH_ALGO="$(_hash_algo)"
 
 # Default flag values
 FORCE=0
-BRANCH=""
-RESET_ALL=0
+HELP_MODE=0
 HASH_CHECK=1
 DELETE_REPO=0
 SWITCH_ONLY=0
-SHOW_CURRENT=0
 OLD_VERSION=""
 SELF_ACTION=""
-PULL_ACTION=""
-RESET_TARGET=""
-LIST_RELEASES=0
 RUNTIME_USER=""
+REMOVE_ACTION=""
+UPDATE_PKG_PATH=0
+COMMAND_ACTION=""
+TARGET_VERSION=""
 UNINSTALL_PURGE=0
 LOCK_PERMISSION=0
 PERMISSION_MODE=""
-USE_PACKAGES_DIR=""
+PREFER_PACKAGES_DIR=""
 PULL_ORIGIN_SOURCE="local"
-POSITIONAL=()
+COMMANDS=()
 
 # Load help text and print it, then exit
 _help() {
     _include "helps"
-    print_luminova_helps
+    print_helps "${1:-}"
 }
 
 _version() {
@@ -162,44 +171,76 @@ trap _cleanup_trap EXIT
 # ── Argument parsing
 for arg in "$@"; do
     case "$arg" in
-        -h|--help)                _help ;;
-        -l|--list)                LIST_RELEASES=1 ;;
+        -h|--help)                HELP_MODE=1 ;;
+        -v|--version)             _version ;;
+        --paths)                  _paths ;;
+        -w=*|--where=*)           _paths "${arg#*=}" ;;
+
+        # Package Arguments (luminova package ...) ;;
+
+        --path=*)                 PREFER_PACKAGES_DIR="${arg#*=}" ;;
+        --path)                   PREFER_PACKAGES_DIR="$(pwd)" ;;
+        -b=*|--branch=*)          TARGET_VERSION="${arg#*=}" ;;
+        -l|--list)                COMMAND_ACTION="list" ;;
+        -c|--current)             COMMAND_ACTION="show_current" ;;
+        -r|--remove)              COMMAND_ACTION="remove"; REMOVE_ACTION="all" ;;
+        -r=*|--remove=*)          COMMAND_ACTION="remove"; REMOVE_ACTION="${arg#*=}" ;;
+        -s=*|--switch=*)          COMMAND_ACTION="switch"; TARGET_VERSION="${arg#*=}" ;;
+
+        # Package and Self arguments (luminova [package|self] ...) ;;
+        -i|--install)             COMMAND_ACTION="install" ;;
+        -u|--update)              COMMAND_ACTION="update" ;;
+        -i=*|--install=*)         COMMAND_ACTION="install"; TARGET_VERSION="${arg#*=}" ;;
+        -u=*|--update=*)          COMMAND_ACTION="update"; TARGET_VERSION="${arg#*=}" ;;
+
+        # Self only arguments (luminova self ...) ;;
+        -ui|--uninstall)          COMMAND_ACTION="uninstall" ;;
+
+        # Command tools arguments ;;
+        -ru=*|--runtime=*)        RUNTIME_USER="${arg#*=}" ;;
+        -p|--purge)               UNINSTALL_PURGE=1 ;;
         -f|--force)               FORCE=1 ;;
         -d|--delete)              DELETE_REPO=1 ;;
-        --paths)                  _paths ;;
-        --path=*)                 USE_PACKAGES_DIR="${arg#*=}" ;;
-        --self=*)                 SELF_ACTION="${arg#*=}" ;;
-        -w=*|--where=*)           _paths "${arg#*=}" ;;
-        -b=*|--branch=*)          BRANCH="${arg#*=}" ;;
-        -s=*|--switch=*)          SWITCH_ONLY=1; BRANCH="${arg#*=}" ;;
-        -m|--lock-permission)     LOCK_PERMISSION=1 ;;
-        -m=*|--lock-permission=*) LOCK_PERMISSION=1; PERMISSION_MODE="${arg#*=}" ;;
-        -i|--install)             PULL_ACTION="install" ;;
-        -i=*|--install=*)         PULL_ACTION="install"; BRANCH="${arg#*=}" ;;
-        -u|--update)              PULL_ACTION="update" ;;
-        -u=*|--update=*)          PULL_ACTION="update"; BRANCH="${arg#*=}" ;;
-        -ru=*|--runtime=*)        RUNTIME_USER="${arg#*=}" ;;
-        -r|--reset)               RESET_ALL=1 ;;
-        -r=*|--reset=*)           RESET_TARGET="${arg#*=}" ;;
-        -p|--purge)               UNINSTALL_PURGE=1 ;;
-        -v|--version)             _version ;;
-        -c|--current)             SHOW_CURRENT=1 ;;
-        *)                        POSITIONAL+=("$arg") ;;
+
+        --lock)                   LOCK_PERMISSION=1 ;;
+        -m=*|--mode=*)            LOCK_PERMISSION=1; PERMISSION_MODE="${arg#*=}" ;;
+        -lm=*|--lock-mode=*)      LOCK_PERMISSION=1; PERMISSION_MODE="${arg#*=}" ;;
+        *)                        COMMANDS+=("$arg") ;;
     esac
 done
 
-_include "config"
-
 # Handle positional arguments
-if [ -z "$USE_PACKAGES_DIR" ]; then
-    USE_PACKAGES_DIR="${POSITIONAL[0]:-}"
+readonly CMD_POSITION="${COMMANDS[0]:-}"
+COMMAND=""
+
+case "$CMD_POSITION" in
+    package)                 COMMAND="package" ;;
+    self)                    COMMAND="self" ;;
+    *)      
+        if [ "$HELP_MODE" -eq 1 ]; then
+            _help
+            exit 0
+        fi
+
+        _help info
+        #_print "Unknown command '$SELF_NAME $CMD_POSITION'" error 0 1
+        exit 1
+        ;;
+esac
+
+if [ "$HELP_MODE" -eq 1 ]; then
+    _help "$COMMAND"
+    exit 0
 fi
 
-if [ -n "$USE_PACKAGES_DIR" ]; then
-    if [ "$SCRIPT_DIR" = "$USE_PACKAGES_DIR" ]; then
-        readonly PACKAGES_DIR="$USE_PACKAGES_DIR/packages"
+_include "config"
+
+
+if [ -n "$PREFER_PACKAGES_DIR" ]; then
+    if [ "$SCRIPT_DIR" = "$PREFER_PACKAGES_DIR" ]; then
+        readonly PACKAGES_DIR="$PREFER_PACKAGES_DIR/packages"
     else
-        readonly PACKAGES_DIR="$USE_PACKAGES_DIR"
+        readonly PACKAGES_DIR="$PREFER_PACKAGES_DIR"
     fi
 elif config_has "LUMINOVA_PACKAGE_DIR"; then
     readonly PACKAGES_DIR="$(config_get LUMINOVA_PACKAGE_DIR)"
@@ -207,24 +248,31 @@ else
     readonly PACKAGES_DIR="$SCRIPT_DIR/packages"
 fi
 
-readonly CONFIG_FILE="$(config_get_file)"
+export CONFIG_FILE="$(config_get_file)"
 readonly REPO_DIR="$PACKAGES_DIR/repo"
 readonly RELEASES_DIR="$PACKAGES_DIR/releases"
 readonly CURRENT_DIR="$PACKAGES_DIR/current"
 
 # Prerequisite check runs after arg parsing so --help/--version bypass it
 _require_cmds
-_setup "$CONFIG_FILE" "$SELF" "$PACKAGES_DIR" || true
 
 # Only root user can run install and update commands
 if ! _is_root; then
-    printf -v cmd '%q ' "$0" "$@"
-
-    _print \
-        "Luminova VCI requires root privileges. Try: sudo ${cmd% }" \
-        error 1 1
+    _print "Luminova VCI '$COMMAND' command requires root privileges." error 0 1
+    _print "Try: sudo $(_cmd "$@")" plain 0 1
 
     exit 1
+fi
+
+if [ -n "$PREFER_PACKAGES_DIR" ] && [ -z "$COMMAND_ACTION" ]; then
+    UPDATE_PKG_PATH=1
+fi
+
+_setup "$CONFIG_FILE" "$SELF" "$PACKAGES_DIR" "$UPDATE_PKG_PATH"
+status=$?
+
+if [ "$UPDATE_PKG_PATH" -eq 1 ]; then
+    exit "$status"
 fi
 
 # Resolve runtime mode
@@ -239,70 +287,87 @@ if [ "$RUNTIME_USER" != "root" ] && [ "$RUNTIME_USER" != "user" ]; then
     exit 1
 fi
 
+# Require a valid command action
+_command_action_in "$COMMAND_ACTION" "$COMMAND" "$SELF_NAME" 
+
 mkdir -p "$PACKAGES_DIR"
 cd "$PACKAGES_DIR"
 
 _include "request"
 
 # Self-management commands
-if [ -n "$SELF_ACTION" ]; then
+if [ "$COMMAND" = "self" ]; then
     _include "manager"
 
-    case "$SELF_ACTION" in
+    case "$COMMAND_ACTION" in
         update)
-            manager_update_self "$RUNTIME_USER" "$SCRIPT_DIR" "$SELF_REPO_URL" "$BRANCH"
+            self_update_script "$RUNTIME_USER" "$SCRIPT_DIR" "$SELF_REPO_URL" "$TARGET_VERSION"
             exit $?
             ;;
         install)
-            manager_install_self "$RUNTIME_USER" "$SELF"
+            _skip_version "$TARGET_VERSION"
+            self_install_script "$RUNTIME_USER" "$SELF"
             exit $?
             ;;
         uninstall)
-            manager_uninstall_self "$RUNTIME_USER" "$UNINSTALL_PURGE" "$SCRIPT_DIR" "$SELF"
+            _skip_version "$TARGET_VERSION"
+            self_uninstall_script "$RUNTIME_USER" "$UNINSTALL_PURGE" "$SCRIPT_DIR" "$SELF"
             exit $?
             ;;
         *)
-            _print "Invalid self command '$SELF_ACTION'" error
+            _print "Invalid self command '$(_cmd "$@")'" error 0 1
             exit 1
             ;;
     esac
 fi
 
+if [ "$COMMAND" != "package" ]; then
+   _print "Unknown command '$(_cmd "$@")'" error 0 1
+    exit 1
+fi
+
 _include "package"
 
 # Query commands (read-only, no build)
-if [ "${SHOW_CURRENT:-0}" -eq 1 ]; then
+if [ "$COMMAND_ACTION" = "show_current" ]; then
     package_current_release "$PACKAGES_DIR"
+    exit $?
 fi
 
-if [ "$LIST_RELEASES" -eq 1 ]; then
+if [ "$COMMAND_ACTION" = "list" ]; then
     package_list_versions "$RELEASES_DIR" "$CURRENT_DIR"
-    exit 0
+    exit $?
 fi
 
-# Reset commands 
-if [ "$RESET_ALL" -eq 1 ]; then
-    package_modules_reset_all "$PACKAGES_DIR" "$SCRIPT_DIR" "$FORCE"
-    exit 0
+# Package switch command
+if [ "$COMMAND_ACTION" = "switch" ]; then
+    package_switch_version "$TARGET_VERSION" "$RELEASES_DIR" "$CURRENT_DIR" "$SCRIPT_DIR"
+    exit $?
 fi
 
-if [ -n "$RESET_TARGET" ]; then
-    package_reset_target_module "$PACKAGES_DIR" "$SCRIPT_DIR" "$RESET_TARGET" "$FORCE" || exit 1
-    exit 0
+# Remove package module 
+if [ "$COMMAND_ACTION" = "remove" ]; then
+    if [ -z "$REMOVE_ACTION" ]; then
+        _print "Unknown command action '$COMMAND_ACTION'" error 0 1
+        exit 1
+    fi
+
+    case "$REMOVE_ACTION" in
+        all)
+            package_clear_modules "$PACKAGES_DIR" "$SCRIPT_DIR" "$FORCE"
+            exit $?
+            ;;
+        *)
+            package_remove_module "$PACKAGES_DIR" "$SCRIPT_DIR" "$RESET_TARGET" "$FORCE"
+            exit $?
+            ;;
+    esac
 fi
 
-# Switch command
-if [ "$SWITCH_ONLY" -eq 1 ]; then
-    package_switch_version "$BRANCH" "$RELEASES_DIR" "$CURRENT_DIR" "$SCRIPT_DIR"
-    exit 0
-fi
+_command_action_in "$COMMAND_ACTION" "$COMMAND" "$SELF_NAME" install update
 
-# Require an explicit install or update command from this point on
-if [ "$PULL_ACTION" != "install" ] && [ "$PULL_ACTION" != "update" ]; then
-    _help
-fi
-
-if [ "$PULL_ACTION" = "update" ]; then
+# Package update module check
+if [ "$COMMAND_ACTION" = "update" ]; then
     package_installed "$RELEASES_DIR" || {
         _print "No installed luminova package to update" warn
         _print "Run command '$SELF_NAME --install' first"
@@ -325,43 +390,47 @@ if [ "$FORCE" -eq 1 ]; then
     HASH_CHECK=0
 fi
 
-if [ "$PULL_ACTION" = "update" ]; then
+# Package update module command
+if [ "$COMMAND_ACTION" = "update" ]; then
     # Always rebuild on update; skip hash comparison
     HASH_CHECK=0
     package_clean_repo "$REPO_DIR" "full" 1
 fi
 
 # Clone (remote) or rsync (local) the source into the repo directory
-package_clone_repo "$PACKAGES_DIR" "$REPO_DIR" "$PACKAGE_REPO_URL" "$PULL_ORIGIN_SOURCE" "$BRANCH"
+package_clone_repo "$PACKAGES_DIR" "$REPO_DIR" "$PACKAGE_REPO_URL" "$PULL_ORIGIN_SOURCE" "$TARGET_VERSION"
 
 # Auto-detect version from git tags or composer.json when not specified
-if [ -z "$BRANCH" ]; then
+if [ -z "$TARGET_VERSION" ]; then
     _print "Auto-detecting version..." info
-    BRANCH="$(package_detect_version "$REPO_DIR" "$PULL_ORIGIN_SOURCE")"
+    TARGET_VERSION="$(package_detect_version "$REPO_DIR" "$PULL_ORIGIN_SOURCE")"
 
-    if [ -n "$BRANCH" ]; then
-        _print "Auto-detected version: $BRANCH" info 1
+    if [ -n "$TARGET_VERSION" ]; then
+        _print "Auto-detected version: $TARGET_VERSION" info 1
     else
         op_label="Install"
-        [ "$PULL_ACTION" = "update" ] && op_label="Update"
+        [ "$COMMAND_ACTION" = "update" ] && op_label="Update"
 
         _print "$op_label mode requires a version; no tags found in repo." error 1 1
-        _print "Usage: $0 --${PULL_ACTION}=<version>" plain
+        _print "Usage: $SELF_NAME --${COMMAND_ACTION}=<version>" plain
         _print "Cleaning up temporary repo clone..." warn
         package_clean_repo "$REPO_DIR" "full"
         exit 1
     fi
 fi
 
-RELEASE_PATH="$RELEASES_DIR/$BRANCH"
-HASH_FILE="$RELEASE_PATH/.hash"
+RELEASE_PATH="$RELEASES_DIR/$TARGET_VERSION"
+RELEASE_METADATA_PATH="$RELEASES_DIR/$TARGET_VERSION/.metadata"
+HASH_FILE="$RELEASE_METADATA_PATH/.hash"
+
+# mkdir -p "$RELEASE_METADATA_PATH"
 
 # Register with the cleanup trap so partial builds are removed on failure
 _RELEASE_PATH="$RELEASE_PATH"
 _HASH_FILE="$HASH_FILE"
 
 # Bring the repo to the exact requested version
-package_sync_repo "$REPO_DIR" "$PULL_ORIGIN_SOURCE" "$BRANCH" "$RUNTIME_USER" || true
+package_sync_repo "$REPO_DIR" "$PULL_ORIGIN_SOURCE" "$TARGET_VERSION" "$RUNTIME_USER" || true
 
 # Compute a content fingerprint for change detection
 REPO_HASH="$(request_hash_repo "$REPO_DIR" "$PULL_ORIGIN_SOURCE" "$HASH_ALGO")"
@@ -370,7 +439,7 @@ REPO_HASH="$(request_hash_repo "$REPO_DIR" "$PULL_ORIGIN_SOURCE" "$HASH_ALGO")"
 if [ "$HASH_CHECK" -eq 1 ] && [ -f "$HASH_FILE" ]; then
     EXISTING_HASH="$(cat "$HASH_FILE")"
     if [ "$EXISTING_HASH" = "$REPO_HASH" ]; then
-        _print "No changes detected in $BRANCH — skipping rebuild." info 1
+        _print "No changes detected in $TARGET_VERSION — skipping rebuild." info 1
 
         if [ "$DELETE_REPO" -eq 0 ] && [ "$PULL_ORIGIN_SOURCE" = "local" ]; then
             package_clean_repo "$REPO_DIR" "full" 1
@@ -391,10 +460,10 @@ if [ -L "$CURRENT_DIR" ]; then
     OLD_VERSION="$(basename "$(realpath "$CURRENT_DIR")")"
 fi
 
-if [ -z "$OLD_VERSION" ] || version_compare "$BRANCH" ">" "$OLD_VERSION"; then
+if [ -z "$OLD_VERSION" ] || _version_compare "$TARGET_VERSION" ">" "$OLD_VERSION"; then
     printf 'Updating current release: %s -> %s\n' \
         "${OLD_VERSION:-none}" \
-        "$BRANCH"
+        "$TARGET_VERSION"
 
     _create_symlink "$RELEASE_PATH" "$CURRENT_DIR" "$SCRIPT_DIR"
 fi
@@ -423,7 +492,7 @@ if [ "${LOCK_PERMISSION:-0}" -eq 1 ]; then
     fi
 fi
 
-_print "Runtime mode: $RUNTIME_USER active version: $BRANCH" info 1
+_print "Runtime mode: $RUNTIME_USER active version: $TARGET_VERSION" info 1
 _print "Deployment complete." success 1
 _print "Package location $PACKAGES_DIR"
 _print "Config location $CONFIG_FILE"

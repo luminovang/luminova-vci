@@ -18,37 +18,67 @@ _setup() {
     local config_file="${1:-$CONFIG_FILE}"
     local self_bin="${2:-$SELF}"
     local packages="${3:-$PACKAGES_DIR}"
+    local is_update_pkg_path="${4:-0}"
 
     local bin_file="$self_bin"
-    local old_packages
+    local old_packages=""
+    local move_data=0
+    local self_dir="$(dirname "$(realpath "$self_bin")")"
+
+    if [ "$packages" = "$self_dir" ]; then
+        packages="$packages/packages"
+    fi
 
     # -----------------------------
-    # Ensure config target exists
+    # Validate config file
     # -----------------------------
     if [ -z "$config_file" ]; then
         return 1
     fi
 
     # -----------------------------
-    # Resolve binary
+    # Resolve binary path
     # -----------------------------
     if config_has "LUMINOVA_VCI_BIN"; then
         bin_file="$(config_get "LUMINOVA_VCI_BIN")"
     fi
 
     # -----------------------------
-    # Resolve package dir safely
+    # Resolve package directory
     # -----------------------------
     if config_has "LUMINOVA_PACKAGE_DIR"; then
         old_packages="$(config_get "LUMINOVA_PACKAGE_DIR")"
 
         if [ -n "$old_packages" ] && [ "$old_packages" != "$packages" ]; then
-            _print "Mixed target package directory" warn 1
+
+            if [ "$is_update_pkg_path" -eq 0 ]; then
+                _print "Mixed target package directory" warn
+            else
+                _print "Changing luminova package target directory" info
+            fi
+            
             _print "Previous package directory: $old_packages" plain
             _print "New package directory:      $packages" plain
 
-            if ! _confirm "Update to new package directory?" "N"; then
-                packages="$old_packages"
+            if _confirm "Update to new package directory" "N"; then
+
+                # check if old directory is empty (safe, no ls, no glob bugs)
+                if [ -d "$old_packages" ] && \
+                   [ -n "$(find "$old_packages" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+
+                    _print "Previous package directory is not empty" warn 1
+
+                    if _confirm "Move existing data to new location" "Y"; then
+                        move_data=1
+                    fi
+                fi
+            else
+                config_write "$config_file" \
+                    "LUMINOVA_VCI_CONF=$config_file" \
+                    "LUMINOVA_VCI_BIN=$bin_file"
+                    
+                return 1
+                # packages="$old_packages"
             fi
         fi
     fi
@@ -59,7 +89,42 @@ _setup() {
     config_write "$config_file" \
         "LUMINOVA_VCI_CONF=$config_file" \
         "LUMINOVA_PACKAGE_DIR=$packages" \
-        "LUMINOVA_VCI_BIN=$bin_file"
+        "LUMINOVA_VCI_BIN=$bin_file" || {
+
+        if [ "$is_update_pkg_path" -eq 1 ]; then
+            _print "Failed to update package configuration" error 0 1
+        fi
+
+        return 1
+    }
+
+    # -----------------------------
+    # Move data if required
+    # -----------------------------
+    if [ "$move_data" -eq 1 ] && [ -n "$old_packages" ] && [ -d "$old_packages" ]; then
+        mkdir -p "$packages" || {
+            _print "Failed to create target package directory" error 0 1
+            return 1
+        }
+
+        # copy first, fail loudly if anything breaks
+        if ! cp -a "$old_packages/." "$packages/"; then
+            _print "Failed to copy package data" error 0 1
+            return 1
+        fi
+
+        # only delete if copy succeeded
+        rm -rf "$old_packages" || {
+            _print "Warning: failed to remove old package directory" warn
+        }
+    fi
+
+    if [ "$is_update_pkg_path" -eq 1 ]; then
+        _print "Luminova package directory was updated" success
+        _print "New package directory: $packages" plain
+    fi
+
+    return 0
 }
 
 # Return 0 if the current process is running as root (UID 0)
@@ -84,6 +149,47 @@ _in_path() {
 # True if string matches X.Y.Z semver
 _is_version() {
     [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]
+}
+
+_skip_version() {
+    [ -n "$1" ] || return 0
+
+    _print \
+        "Ignoring target version '$1'; this command does not use a version argument." \
+        info
+}
+
+_command_action_in() {
+    local action="$1"
+    local command="${2:-$COMMAND}"
+    local name="${3:-$SELF_NAME}"
+
+    shift 3
+
+    local expected
+    local actions=("$@")
+
+    # Default allowed actions
+    if [ "${#actions[@]}" -eq 0 ]; then
+        actions=(
+            install
+            update
+            show_current
+            list
+            uninstall
+            switch
+            remove
+        )
+    fi
+
+    for expected in "${actions[@]}"; do
+        [ "$action" = "$expected" ] && return 0
+    done
+
+    _print "Unknown command: '$name $command $action'" error 0 1
+
+    _help "$command"
+    exit 1
 }
 
 # Normalize path separators and strip trailing slash
@@ -591,9 +697,13 @@ _assert_path() {
     local self="${3:-${SELF}}"
     local silent="${4:-0}"
 
+   if [[ ! -d "$target" ]]; then
+        return 0
+    fi
+
     # Resolve real paths (portable fallback if readlink -f is missing)
     target="$(cd "$target" 2>/dev/null && pwd -P)" || {
-        [ "$silent" -eq 1 ] || _print "Invalid target path." error 1 1
+        [ "$silent" -eq 1 ] || _print "Invalid target path "$target"." error 1 1
         return 1
     }
 
