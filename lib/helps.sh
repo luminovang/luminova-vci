@@ -48,6 +48,7 @@ Options:
                                 Lock permissions after deploy (recommended: 755 or 555)
   -r, --reset[=<target>]        Remove a specific version (--reset=3.8.0), the repo clone
                                 (--reset=repo), or everything (--reset)
+  -w, --where[=<target>]        Find path to (packages | releases | repo)
 
 Directory structure:
   packages/

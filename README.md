@@ -207,8 +207,7 @@ return [
     // 'current' always follows the active symlink
     'luminova.paths' => [
         'root'      => '/opt/luminova/packages',
-        'system'    => '/opt/luminova/packages/current/system',
-        'bootstrap' => '/opt/luminova/packages/current/bootstrap',
+        'target'    => '/opt/luminova/packages/current',
     ],
 ];
 ```
@@ -216,8 +215,7 @@ return [
 **To pin a project to a specific version** instead of always following `current`:
 
 ```php
-'system'    => '/opt/luminova/packages/releases/3.8.0/system',
-'bootstrap' => '/opt/luminova/packages/releases/3.8.0/bootstrap',
+'target' => '/opt/luminova/packages/releases/3.8.0',
 ```
 
 ---

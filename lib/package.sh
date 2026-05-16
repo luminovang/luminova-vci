@@ -48,6 +48,7 @@ package_build_repo_structure() {
 package_list_versions() {
     local dir="$1"
     local current_link="$2"
+    local current=""
 
     if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
         _print "No releases installed yet." warn 1
@@ -55,7 +56,6 @@ package_list_versions() {
     fi
 
     # Resolve the active version whether current is a symlink or a plain directory
-    local current=""
     if [ -L "$current_link" ] || [ -d "$current_link" ]; then
         current="$(basename "$(_readlink_resolved "$current_link" 2>/dev/null || true)")"
     fi

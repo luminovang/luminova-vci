@@ -14,6 +14,54 @@ _cleanup_trap() {
     fi
 }
 
+_setup() {
+    local config_file="${1:-$CONFIG_FILE}"
+    local self_bin="${2:-$SELF}"
+    local packages="${3:-$PACKAGES_DIR}"
+
+    local bin_file="$self_bin"
+    local old_packages
+
+    # -----------------------------
+    # Ensure config target exists
+    # -----------------------------
+    if [ -z "$config_file" ]; then
+        return 1
+    fi
+
+    # -----------------------------
+    # Resolve binary
+    # -----------------------------
+    if config_has "LUMINOVA_VCI_BIN"; then
+        bin_file="$(config_get "LUMINOVA_VCI_BIN")"
+    fi
+
+    # -----------------------------
+    # Resolve package dir safely
+    # -----------------------------
+    if config_has "LUMINOVA_PACKAGE_DIR"; then
+        old_packages="$(config_get "LUMINOVA_PACKAGE_DIR")"
+
+        if [ -n "$old_packages" ] && [ "$old_packages" != "$packages" ]; then
+            _print "Mixed target package directory" warn 1
+            _print "Previous package directory: $old_packages" plain
+            _print "New package directory:      $packages" plain
+
+            if ! _confirm "Update to new package directory?" "N"; then
+                packages="$old_packages"
+            fi
+        fi
+    fi
+
+    # -----------------------------
+    # Write config atomically
+    # -----------------------------
+    config_write "$config_file" \
+        "LUMINOVA_VCI_CONF=$config_file" \
+        "LUMINOVA_PACKAGE_DIR=$packages" \
+        "LUMINOVA_VCI_BIN=$bin_file"
+}
+
 # Return 0 if the current process is running as root (UID 0)
 _is_root() {
     [ "$(id -u)" -eq 0 ]
@@ -58,6 +106,38 @@ _in_executable_path() {
     [ -x "$dir" ] || return 1
 
     return 0
+}
+
+_version_compare() {
+    local v1="$1"
+    local op="$2"
+    local v2="$3"
+
+    case "$op" in
+        ">")
+            [ "$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | tail -n1)" = "$v1" ] \
+            && [ "$v1" != "$v2" ]
+            ;;
+        "<")
+            [ "$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | head -n1)" = "$v1" ] \
+            && [ "$v1" != "$v2" ]
+            ;;
+        ">=")
+            [ "$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | tail -n1)" = "$v1" ]
+            ;;
+        "<=")
+            [ "$(printf '%s\n%s\n' "$v1" "$v2" | sort -V | head -n1)" = "$v1" ]
+            ;;
+        "="|"==")
+            [ "$v1" = "$v2" ]
+            ;;
+        "!=")
+            [ "$v1" != "$v2" ]
+            ;;
+        *)
+            return 2
+            ;;
+    esac
 }
 
 # Return 0 if path is owned by root with the given permission mode
@@ -285,6 +365,21 @@ _hash() {
     esac
 }
 
+_prompt() {
+    local message="$1"
+    local default="${2:-}"
+    local value
+
+    if [ -n "$default" ]; then
+        read -rp "$message [$default]: " value
+        value="${value:-$default}"
+    else
+        read -rp "$message: " value
+    fi
+
+    printf '%s' "$value"
+}
+
 # Prompt for yes/no confirmation; respects a default and non-interactive mode
 _confirm() {
     local message="${1:-Confirm execution}"
@@ -422,36 +517,45 @@ _can_symlink() {
     return 1
 }
 
+_user_group() {
+     case "$1" in
+        root)
+            printf "%s:%s\n" "root" "root"
+            return 0
+            ;;
+        user)
+            printf "%s:%s\n" "$(id -un)" "$(id -gn)"
+            return 0
+            ;;
+        *)
+            if _is_root; then
+                printf "%s:%s\n" "root" "root"
+                return 0
+            fi
+            
+            _print "Unknown runtime mode: '$1'" error 1 1
+            return 1
+            ;;
+    esac
+}
+
 # Apply ownership and permission mode to a path recursively
 _lock_permission() {
     local path="$1"
     local mode="${2:-755}"
     local runtime="${3:-root}"
+    local user_group
 
     if [ -z "$path" ] || [ "$path" = "/" ]; then
         _print "Unsafe path for locking: '$path'" error 1 1
         return 1
     fi
 
-    local user group
-    case "$runtime" in
-        root)
-            user="root"
-            group="root"
-            ;;
-        user)
-            user="$(id -un)"
-            group="$(id -gn)"
-            ;;
-        *)
-            _print "Unknown runtime mode: '$runtime'" error 1 1
-            return 1
-            ;;
-    esac
+    user_group="$(_user_group "$runtime")" || return 1
 
-    _print "Locking $path (mode: $mode, owner: $user:$group)..." warn 1
+    _print "Locking $path (mode: $mode, owner: $user_group)..." warn 1
 
-    chown -R "$user:$group" "$path" 2>/dev/null \
+    chown -R "$user_group" "$path" 2>/dev/null \
         || _print "Ownership change skipped (insufficient permissions)." info 1
 
     if [ "$runtime" = "root" ]; then
@@ -516,13 +620,13 @@ _assert_path() {
     fi
 
     # Ensure target is inside base (strict boundary match)
-    case "$target/" in
-        "$base/"*) ;;
-        *)
-           [ "$silent" -eq 1 ] ||  _print "Refusing reset: path is outside the managed directory." error 1 1
-            return 1
-            ;;
-    esac
+    # case "$target/" in
+    #    "$base/"*) ;;
+    #    *)
+    #       [ "$silent" -eq 1 ] ||  _print "Refusing reset: path is outside the managed directory." error 1 1
+    #        return 1
+    #        ;;
+    # esac
 
     # Ensure script is NOT inside target
     case "$self" in

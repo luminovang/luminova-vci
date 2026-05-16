@@ -88,6 +88,7 @@ HASH_CHECK=1
 DELETE_REPO=0
 SWITCH_ONLY=0
 SHOW_CURRENT=0
+OLD_VERSION=""
 SELF_ACTION=""
 PULL_ACTION=""
 RESET_TARGET=""
@@ -113,12 +114,45 @@ _version() {
 }
 
 _paths() {
+    local where="${1:-}"
+    local path
     _include "config"
 
-    _print "Luminova VCI Paths" success
-    _print "LUMINOVA_VCI_SCRIPT_DIR=$SCRIPT_DIR"
+    if [ -z "$where" ]; then
+        _print "Luminova VCI Paths" success
+        _print "LUMINOVA_VCI_SCRIPT_DIR=$SCRIPT_DIR"
 
-    config_get
+        config_get
+    else
+        if config_has "LUMINOVA_PACKAGE_DIR"; then
+            path="$(config_get LUMINOVA_PACKAGE_DIR)"
+        else
+            path="$SCRIPT_DIR/packages"
+        fi
+
+        case "$where" in
+            packages)
+                _print "$path"
+                exit 1
+                ;;
+            release)
+                _print "$path/release"
+                exit 1
+                ;;
+            current)
+                _print "$path/current"
+                exit 1
+                ;;
+            repo)
+                _print "$path/repo"
+                exit 1
+                ;;
+            *)
+                _print "Invalid where command target '$where'" error
+                exit 1
+                ;;
+        esac
+    fi
     exit 0
 }
 
@@ -135,6 +169,7 @@ for arg in "$@"; do
         --paths)                  _paths ;;
         --path=*)                 USE_PACKAGES_DIR="${arg#*=}" ;;
         --self=*)                 SELF_ACTION="${arg#*=}" ;;
+        -w=*|--where=*)           _paths "${arg#*=}" ;;
         -b=*|--branch=*)          BRANCH="${arg#*=}" ;;
         -s=*|--switch=*)          SWITCH_ONLY=1; BRANCH="${arg#*=}" ;;
         -m|--lock-permission)     LOCK_PERMISSION=1 ;;
@@ -160,25 +195,37 @@ if [ -z "$USE_PACKAGES_DIR" ]; then
     USE_PACKAGES_DIR="${POSITIONAL[0]:-}"
 fi
 
-if config_has "LUMINOVA_PACKAGE_DIR"; then
-    readonly PACKAGES_DIR="$(config_get LUMINOVA_PACKAGE_DIR)"
-elif [ -n "$USE_PACKAGES_DIR" ]; then
+if [ -n "$USE_PACKAGES_DIR" ]; then
     if [ "$SCRIPT_DIR" = "$USE_PACKAGES_DIR" ]; then
         readonly PACKAGES_DIR="$USE_PACKAGES_DIR/packages"
     else
         readonly PACKAGES_DIR="$USE_PACKAGES_DIR"
     fi
+elif config_has "LUMINOVA_PACKAGE_DIR"; then
+    readonly PACKAGES_DIR="$(config_get LUMINOVA_PACKAGE_DIR)"
 else
     readonly PACKAGES_DIR="$SCRIPT_DIR/packages"
 fi
 
-readonly CONFIG_DIR="$(config_path)"
+readonly CONFIG_FILE="$(config_get_file)"
 readonly REPO_DIR="$PACKAGES_DIR/repo"
 readonly RELEASES_DIR="$PACKAGES_DIR/releases"
 readonly CURRENT_DIR="$PACKAGES_DIR/current"
 
 # Prerequisite check runs after arg parsing so --help/--version bypass it
 _require_cmds
+_setup "$CONFIG_FILE" "$SELF" "$PACKAGES_DIR" || true
+
+# Only root user can run install and update commands
+if ! _is_root; then
+    printf -v cmd '%q ' "$0" "$@"
+
+    _print \
+        "Luminova VCI requires root privileges. Try: sudo ${cmd% }" \
+        error 1 1
+
+    exit 1
+fi
 
 # Resolve runtime mode
 RUNTIME_USER="${RUNTIME_USER:-auto}"
@@ -207,11 +254,11 @@ if [ -n "$SELF_ACTION" ]; then
             exit $?
             ;;
         install)
-            manager_install_self "$RUNTIME_USER" "$SELF" "$SCRIPT_DIR"
+            manager_install_self "$RUNTIME_USER" "$SELF"
             exit $?
             ;;
         uninstall)
-            manager_uninstall_self "$RUNTIME_USER" "$UNINSTALL_PURGE" "$SELF" "$SCRIPT_DIR"
+            manager_uninstall_self "$RUNTIME_USER" "$UNINSTALL_PURGE" "$SCRIPT_DIR" "$SELF"
             exit $?
             ;;
         *)
@@ -258,7 +305,7 @@ fi
 if [ "$PULL_ACTION" = "update" ]; then
     package_installed "$RELEASES_DIR" || {
         _print "No installed luminova package to update" warn
-        _print "Run command `$SELF_NAME --install` first"
+        _print "Run command '$SELF_NAME --install' first"
         exit 1
     }
 fi
@@ -340,7 +387,17 @@ package_build_repo_structure "$REPO_DIR" "$RELEASE_PATH"
 printf "%s\n" "$REPO_HASH" > "$HASH_FILE"
 
 # Point 'current' at the newly built release
-_create_symlink "$RELEASE_PATH" "$CURRENT_DIR" "$SCRIPT_DIR"
+if [ -L "$CURRENT_DIR" ]; then
+    OLD_VERSION="$(basename "$(realpath "$CURRENT_DIR")")"
+fi
+
+if [ -z "$OLD_VERSION" ] || version_compare "$BRANCH" ">" "$OLD_VERSION"; then
+    printf 'Updating current release: %s -> %s\n' \
+        "${OLD_VERSION:-none}" \
+        "$BRANCH"
+
+    _create_symlink "$RELEASE_PATH" "$CURRENT_DIR" "$SCRIPT_DIR"
+fi
 
 # Optionally remove repo source files to reclaim disk space after build
 if [ "$DELETE_REPO" -eq 1 ]; then
@@ -348,12 +405,7 @@ if [ "$DELETE_REPO" -eq 1 ]; then
     package_clean_repo "$REPO_DIR" "keep_git"
 fi
 
-if [ -n "$CONFIG_DIR" ]; then
-    config_write "$CONFIG_DIR" \
-        "LUMINOVA_VCI_BIN=$SELF" \
-        "LUMINOVA_VCI_CONF=$CONFIG_DIR" \
-        "LUMINOVA_PACKAGE_DIR=$PACKAGES_DIR"
-fi
+# _setup "$CONFIG_FILE" "$SELF" "$PACKAGES_DIR"
 
 # Harden the base directory if it isn't already locked at 755
 if ! _is_locked "$SCRIPT_DIR" 755; then
@@ -374,6 +426,6 @@ fi
 _print "Runtime mode: $RUNTIME_USER active version: $BRANCH" info 1
 _print "Deployment complete." success 1
 _print "Package location $PACKAGES_DIR"
-_print "Config location $CONFIG_DIR"
+_print "Config location $CONFIG_FILE"
 
 exit 0

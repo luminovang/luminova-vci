@@ -1,165 +1,11 @@
 #!/usr/bin/env bash
+manager_detect_version() {
+    local dir="$1"
 
-# Install this script to the system PATH as 'luminova'
-manager_install_self() {
-    local runtime="${1:-root}"
-    local script_path="$2"
-    local base="${3:-${SCRIPT_DIR}}"
-    local target="${4:-}"
-    local target_dir conf_dir
-
-    if [ "$runtime" = "root" ] && ! _is_root; then
-        _print "Global install requires root. Try: sudo $0 --self=install" error 1 1
-        exit 1
-    fi
-
-    if [ -z "$target" ]; then
-        target="$(config_script_target_bin "$runtime")" || {
-            _print "Could not find PATH. Use --bin=<path> to specify installation path"
-            exit 1
-        }
-
-        target_dir="$(dirname "$target")"
-    else
-        _in_executable_path "$target" || {
-            _print "Target $target is not in an executable or not accessible PATH"
-            exit 1
-        }
-
-        target_dir="$target"
-    fi
-
-    if [ -e "$target" ] || [ -L "$target" ]; then
-        _print "Already installed at $target" warn 1
-        _print "Use '--self=update' to upgrade or '--self=uninstall' to remove." info
-        exit 1
-    fi
-
-    mkdir -p "$target_dir" || {
-        _print "Failed to create install directory: $target_dir" error 1
-        exit 1
-    }
-
-    # Prefer a symlink so updates to the source are reflected immediately
-    if _can_symlink "$target_dir"; then
-        ln -sfn "$script_path" "$target" || {
-            _print "Failed to create symlink at $target" error 1
-            exit 1
-        }
-        _print "Symlinked: $script_path → $target" info 1
-    else
-        cp "$script_path" "$target" || {
-            _print "Failed to copy script to $target" error 1
-            exit 1
-        }
-        _print "Copied to $target" info 1
-    fi
-
-    chmod +x "$target" 2>/dev/null || true
-    # config_clear "" 1
-
-    conf_dir="$(config_path)"
-
-    if [ -n "$conf_dir" ]; then
-        config_write "$conf_dir" \
-            "LUMINOVA_VCI_BIN=$target" \
-            "LUMINOVA_VCI_BASE=$base" \
-            "LUMINOVA_VCI_CONF=$conf_dir"
-    fi
-    
-    # Offer to add the install directory to PATH if luminova isn't found yet
-    if ! _command_exists "luminova"; then
-        if _confirm "Add '$target_dir' to PATH"; then
-            config_add_global_path "$target_dir"
-        else
-            _print "Directory not in PATH: $target_dir" warn 1
-            _print "Add this to your shell config:" info
-            _print "  export PATH=\"$target_dir:\$PATH\"" plain
-        fi
-    fi
-
-    _print "Install completed" success 1
-    _print "Installed target: $target"
-    exit 0
-}
-
-# Remove the installed 'luminova' binary and optionally purge data directories
-manager_uninstall_self() {
-    local runtime="${1:-root}"
-    local purge="${2:-0}"
-    local target="${3:-${BASE_SOURCE}}"
-    local main_dir="${4:-${SCRIPT_DIR}}"
-    local main_script="${5:-${BASE_SOURCE}}"
-    local ok=1
-    local link_path is_main_script
-
-    if [ "$runtime" = "root" ] && ! _is_root; then
-        _print "Root privileges required for global uninstall. Try: sudo luminova --self=uninstall" error 1 1
-        exit 1
-    fi
-
-    link_path=""
-    is_main_script=0
-
-    if [[ "$target" == "$main_dir/luminova.sh" || "$target" == "$main_dir/"* ]]; then
-        is_main_script=1
-        link_path="$(config_script_target_bin "$runtime")"
-
-        if [ -n "$link_path" ] && [ -L "$link_path" ]; then
-
-            _print "Target is part of main Luminova installation: $target" warn 1
-            _print "A global symlink exists: $link_path" warn 1
-
-            if _confirm "Uninstall the global link instead of full installation"; then
-                target="$link_path"
-            fi
-        fi
-    fi
-
-    # Guard: refuse to uninstall if target is the main script or inside main dir
-    case "$target" in
-        "$main_dir/luminova.sh" | "$main_dir"/*)
-            _print "Cannot uninstall: script was never installed as a global command" error 1 1
-            exit 1
-            ;;
-    esac
-
-    if [[ -z "$target" || ( ! -e "$target" && ! -L "$target" ) ]]; then
-        target="$(config_script_target_bin "$runtime")" || exit 1
-    fi
-
-    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
-        _print "Not installed at $target" warn 1
-        exit 1
-    fi
-
-    if [ -e "$target" ] && [ ! -L "$target" ]; then
-        _print "Uninstalling main luminova VCI at $target." error 1 
-        _print "This will delete everything including releases." error 1
-
-        if ! _confirm "Continue"; then
-            _print "Abort uninstallation" info 1 1
-            exit 1
-        fi
-    fi
-
-    _print "Removing $target..."
-    rm -f "$target" || {
-        _print "Failed to remove $target" error 1 1
-        exit 1
-    }
-
-    if [ "$is_main_script" -eq 1 ] && [ "$purge" -eq 1 ]; then
-        config_clear || ok=0
-    fi
-
-    if [ "$ok" -eq 1 ]; then
-        _print "Uninstall completed." success 1
-        exit 0
-    fi
-
-    _print "Uninstall completed with errors." warn 1
-    exit 1
+    get_version bash "$dir/luminova.sh" && return 0
+    get_version git "$dir" && return 0
+    get_version composer "$dir/composer.json" && return 0
+    return 1
 }
 
 manager_copy_updates() {
@@ -203,13 +49,213 @@ manager_copy_updates() {
     return 0
 }
 
-manager_detect_version() {
-    local dir="$1"
+# Install this script to the system PATH as 'luminova'
+# Install luminova into a system executable PATH.
+manager_install_self() {
+    local runtime="${1:-root}"
+    local script_path="$2"
+    local default_target="${3:-}"
+    local install_dir=""
+    local target=""
+    local bin_name="luminova"
+    local conf_file=""
 
-    get_version bash "$dir/luminova.sh" && return 0
-    get_version git "$dir" && return 0
-    get_version composer "$dir/composer.json" && return 0
-    return 1
+    if [ -z "$default_target" ]; then
+        default_target="$(config_script_target_bin "$runtime")" || {
+            _print "Unable to detect installation path." error 1
+            default_target=""
+        }
+
+        if [ -n "$default_target" ] && _confirm "Install luminova to '$default_target'" "Y"; then
+            install_dir="$(dirname "$default_target")"
+        fi
+    else
+        install_dir="$default_target"
+    fi
+
+    if [ -z "$install_dir" ]; then
+        install_dir="$(_prompt 'Enter installation directory or full path')" || true
+    fi
+
+    if [ -z "$install_dir" ]; then
+        _print "Installation path cannot be empty." error 1
+        exit 1
+    fi
+
+    install_dir="${install_dir%/}"
+
+    # Normalize: accept both directory and full binary path
+    if [ -f "$install_dir" ] || [ -L "$install_dir" ]; then
+        target="$install_dir"
+        install_dir="$(dirname "$install_dir")"
+    elif [ "${install_dir##*/}" = "$bin_name" ]; then
+        target="$install_dir"
+        install_dir="$(dirname "$install_dir")"
+    else
+        target="$install_dir/$bin_name"
+    fi
+
+    if ! _in_executable_path "$install_dir"; then
+        _print "Invalid or inaccessible installation directory:" error 1
+        _print "  $install_dir" plain
+        exit 1
+    fi
+
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        _print "Already installed:" warn 1
+        _print "  $target" plain
+        _print "Use '--self=uninstall' to remove luminova binary." info
+        exit 1
+    fi
+
+    mkdir -p "$install_dir" || {
+        _print "Failed to create directory:" error 1
+        _print "  $install_dir" plain
+        exit 1
+    }
+
+    if _can_symlink "$install_dir"; then
+        ln -sfn "$script_path" "$target" || {
+            _print "Failed to create symlink:" error 1
+            _print "  $target" plain
+            exit 1
+        }
+        _print "Symlink created:" success 1
+        _print "  $target → $script_path" plain
+    else
+        cp "$script_path" "$target" || {
+            _print "Failed to copy file:" error 1
+            _print "  $target" plain
+            exit 1
+        }
+        _print "Installed binary:" success 1
+        _print "  $target" plain
+    fi
+
+    chmod +x "$target" 2>/dev/null || true
+
+    conf_file="$(config_get_file)"
+
+    if [ -n "$conf_file" ]; then
+        _print "  Writing configurations to '$conf_file'" plain
+        config_write "$conf_file" \
+            "LUMINOVA_VCI_BIN=$target" \
+            "LUMINOVA_VCI_CONF=$conf_file"
+    fi
+
+    if ! _command_exists "luminova"; then
+        if _confirm "Add '$install_dir' to PATH" "Y"; then
+            config_add_global_path "$install_dir"
+        else
+            _print "PATH not updated:" warn 1
+            _print "  $install_dir not in PATH" plain
+            _print "Add manually:" info
+            _print "  export PATH=\"$install_dir:\$PATH\"" plain
+        fi
+    fi
+
+    _print "Installation completed." success 1
+    _print "Binary: $target" info
+
+    exit 0
+}
+
+# Remove the installed 'luminova' binary and optionally purge data directories
+manager_uninstall_self() {
+    local runtime="${1:-root}"
+    local purge="${2:-0}"
+    local main_dir="${3:-$SCRIPT_DIR}"
+    local main_script="${4:-$SELF}"
+    local ok=1
+    local target=""
+    local is_local=0
+    local conf_file mode="file"
+
+    # Resolve installation target
+    target="$(config_get "LUMINOVA_VCI_BIN")" || target=""
+
+    if [ -z "$target" ]; then
+        target="$(config_script_target_bin "$runtime")" || target=""
+    fi
+
+    if [ -z "$target" ]; then
+        if _command_exists "luminova"; then
+            target="$(command -v luminova 2>/dev/null)" || target=""
+        else
+            _print "Luminova is not installed." warn 1
+            exit 1
+        fi
+    fi
+
+    if [ -z "$target" ]; then
+        _print "Unable to resolve installed binary path." error 1
+        exit 1
+    fi
+
+    # Validate existence
+    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+        _print "Luminova not found at: $target" warn 1
+        exit 1
+    fi
+
+    # Detect local install
+    case "$target" in
+        "$main_dir/"*) is_local=1 ;;
+    esac
+
+    # Safety confirmation
+    if [[ "$is_local" -eq 1 || ( -e "$target" && ! -L "$target" ) ]]; then
+        _print "Removing full Luminova installation:" warn 1
+        _print "  $target" plain
+
+        if ! _confirm "Continue" "N"; then
+            _print "Uninstall aborted." info 1
+            exit 1
+        fi
+    fi
+
+    # Remove binary
+    if [ "$is_local" -eq 1 ]; then
+        _print "Removing full Luminova installation directory:" warn 1
+        _print "  $main_dir" plain
+
+        rm -rf "$main_dir" || {
+            _print "Failed to remove directory: $main_dir" error 1
+            exit 1
+        }
+
+        purge=1
+        mode="dir"
+    else
+        _print "Removing binary:" warn 1
+        _print "  $target" plain
+
+        rm -f "$target" || {
+            _print "Failed to remove binary: $target" error 1
+            exit 1
+        }
+    fi
+
+    # Config cleanup (ONLY global uninstall)
+    if [ "$purge" -eq 1 ]; then
+        config_clear "" "$mode" || ok=0
+    fi
+    
+    if [ "$is_local" -eq 0 ]; then
+        conf_file="$(config_get_file)"
+
+        if [ -n "$conf_file" ]; then
+            config_write "$conf_file" "LUMINOVA_VCI_BIN=$main_script"
+        fi
+    fi
+
+    if [ "$ok" -eq 1 ]; then
+        _print "Uninstall completed successfully." success 1
+        exit 0
+    fi
+
+    _print "Uninstall completed with warnings." warn 1
+    exit 1
 }
 
 # Replace the installed script with the latest version downloaded from GitHub.
@@ -229,11 +275,6 @@ manager_update_self() {
     local cur_version="${5:-${VERSION}}" 
 
     local isolation handler new_version new_script
-    
-    if [ "$runtime" = "root" ] && ! _is_root; then
-        _print "Root required for global update. Use: sudo luminova self-update" error 1 1
-        exit 1
-    fi
 
     isolation="$(_make_temp dir "" "luminova.vci.update.isolation")" || {
         _print "Failed to prepare update workspace: $isolation" error 1 1

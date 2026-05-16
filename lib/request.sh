@@ -267,7 +267,7 @@ request_sync_repo() {
                 git -C "$target" reset --hard
 
                 # Remove untracked files (skip in user mode to avoid permission errors)
-                if [ "$runtime" != "user" ]; then
+                if [ "$runtime" = "root" ]; then
                     git -C "$target" clean -fdx 2>/dev/null || true
                 fi
 
@@ -306,7 +306,7 @@ request_sync_repo() {
         fi
 
         # Remove untracked files (skip in user mode to avoid permission errors)
-        if [ "$runtime" != "user" ]; then
+        if [ "$runtime" = "root" ]; then
             git -C "$target" clean -fdx 2>/dev/null || true
         fi
 
