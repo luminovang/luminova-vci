@@ -31,7 +31,7 @@ def _find_script() -> Path:
     return _SCRIPT_PATH
 
 
-def run(args: list[str], *, env: dict[str, str] | None = None) -> int:
+def run(list[str], *, env: dict[str, str] | None = None) -> int:
     """
     Execute luminova.sh with *args* and return its exit code.
 

@@ -51,7 +51,7 @@ manager_copy_updates() {
 
 # Install this script to the system PATH as 'luminova'
 # Install luminova into a system executable PATH.
-manager_install_self() {
+self_install_script() {
     local runtime="${1:-root}"
     local script_path="$2"
     local default_target="${3:-}"
@@ -161,7 +161,7 @@ manager_install_self() {
 }
 
 # Remove the installed 'luminova' binary and optionally purge data directories
-manager_uninstall_self() {
+self_uninstall_script() {
     local runtime="${1:-root}"
     local purge="${2:-0}"
     local main_dir="${3:-$SCRIPT_DIR}"
@@ -266,8 +266,8 @@ manager_uninstall_self() {
 #   3. Validate syntax with bash -n.
 #   4. Compare VERSION strings; skip if already current.
 #   5. Set +x and atomically rename over the installed copy.
-#  manager_update_self "$RUNTIME_USER" "$SCRIPT_DIR" "$SELF_REPO_URL" "$BRANCH"
-manager_update_self() {
+#  self_update_script "$RUNTIME_USER" "$SCRIPT_DIR" "$SELF_REPO_URL" "$TARGET_VERSION"
+self_update_script() {
     local runtime="${1:-root}"
     local destination="${2:-${SCRIPT_DIR}}"
     local target="$3"

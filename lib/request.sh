@@ -249,7 +249,7 @@ request_hash_repo() {
     fi
 }
 
-# package_sync_repo "$REPO_DIR" "$PULL_ORIGIN_SOURCE" "$BRANCH" "$RUNTIME_USER"
+# package_sync_repo "$REPO_DIR" "$PULL_ORIGIN_SOURCE" "$TARGET_VERSION" "$RUNTIME_USER"
 # request_sync_repo "$target" "$version" "$source" "$runtime"
 request_sync_repo() {
     local target="$1"

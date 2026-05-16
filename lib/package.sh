@@ -206,7 +206,7 @@ package_force_delete_repo() {
 }
 
 # Remove all releases, the repo clone, and the current symlink
-package_modules_reset_all() {
+package_clear_modules() {
     local packages="${1:-${PACKAGES_DIR}}"
     local base="${2:-${SCRIPT_DIR}}"
     local force="$3"
@@ -223,7 +223,7 @@ package_modules_reset_all() {
 }
 
 # Remove a single release version or the repo clone directory
-package_reset_target_module() {
+package_remove_module() {
     local packages="${1:-${PACKAGES_DIR}}"
     local base="${2:-${SCRIPT_DIR}}"
     local target="$3"
